@@ -96,7 +96,7 @@ class Handler(FileSystemEventHandler):
             self.handle_event(event)
 
     def handle_event(self, event):
-        if os.path.basename(event.src_path.endswith) == LOCK_NAME: return
+        if os.path.basename(event.src_path) == LOCK_NAME: return
         abs_path = abspath(event.src_path)
         abs_dir = dirname(abs_path)
         rel_path = relpath(abs_path, self.local_real)
