@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 import logging
 logging.basicConfig(
     format="%(levelname)-8s [%(name)s] %(message)s",
-    level=logging.DEBUG
+    level=logging.INFO
 )
 log = logging.getLogger(__name__)
 import os
