@@ -1,0 +1,35 @@
+{
+    "ignore": [
+        "/.iml",
+        "/.zedstate",
+        "/.git/*",
+        "/.idea/*"
+    ],
+    "jobs": {
+        "EMP": {
+            "local": "EMP",
+            "remote": "dan:/var/www/html/EMP",
+            "ignore": []
+        },
+        "Processes": {
+            "local": "processes",
+            "remote": "dan:/home/ec2-user/processes",
+            "ignore": []
+        },
+        "Application": {
+            "local": "Application",
+            "remote": "dan:/var/www/html/Application",
+            "ignore": []
+        },
+        "Social Network": {
+            "local": "SocialNetwork",
+            "remote": "dan:/var/www/html/SocialNetwork",
+            "ignore": []
+        },
+        "Web Campaigns": {
+            "local": "Web-Campaigns",
+            "remote": "dan:/var/www/html/Web-Campaigns",
+            "ignore": []
+        }
+    }
+}
