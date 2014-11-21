@@ -160,7 +160,7 @@ def tick():
             log.debug("(%s) rsync include list:\n%s", name, contents)
 
 
-        cmdstr = ' && '.join(cmds).format(
+        cmdstr = '; '.join(cmds).format(
             lock_file=handler.lock_file,
             local=handler.local_real,
             remote=handler.remote
