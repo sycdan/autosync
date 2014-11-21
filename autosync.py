@@ -140,7 +140,7 @@ def tick():
         dirs = list(handler.changed_dirs)
         handler.changed_dirs = []
         log.debug("Dirs to sync: %s", dirs)
-        """
+
         # write the list of dirs to include to the lock file
         with open(handler.lock_file, 'wb') as f:
             for d in dirs:
@@ -156,8 +156,8 @@ def tick():
                 f.write('{0}{1}***\n'.format(d, os.sep))
 
         with open(handler.lock_file, 'rb') as f:
-            print("rsync include list:")
-            print(f.read())
+            contents = f.read()
+            log.debug("(%s) rsync include list:\n%s", name, contents)
 
 
         cmdstr = ' && '.join(cmds).format(
@@ -166,8 +166,8 @@ def tick():
             remote=handler.remote
         )
 
-        log.info("Running cmd: %s", cmdstr)
-        os.popen(cmdstr)"""
+        log.info("(%s) %s", name, cmdstr)
+        os.popen(cmdstr)
         log.debug("(%s) Resetting change time", name)
         handler.last_change = None
 
