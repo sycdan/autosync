@@ -1,11 +1,9 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 from __future__ import print_function
 from __future__ import unicode_literals
+import argparse
 import logging
-logging.basicConfig(
-    format="%(levelname)-8s [%(name)s] %(message)s",
-    level=logging.INFO
-)
 log = logging.getLogger(__name__)
 import os
 from os.path import dirname
@@ -219,13 +217,8 @@ def create_handlers():
     else:
         sys.exit("No jobs defined in config file")
 
-if __name__ == '__main__':
-    #TODO args
-    # Set up and parse arguments
-    #ap = ArgumentParser()
-    #ap.add_argument("config", help="The config file to use.")
-    #args = ap.parse_args()
-
+def main(args):
+    logging.basicConfig(format="%(levelname)-8s %(message)s", level=args.loglevel or logging.INFO)
     load_config()
     create_handlers()
     try:
@@ -235,3 +228,13 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-v', '--verbose', help="increase verbosity (show debugging messages)",
+        action='store_const', const=logging.DEBUG, dest='loglevel')
+    group.add_argument('-q', '--quiet', help="decrease verbosity (only show warnings)",
+        action='store_const', const=logging.WARN, dest='loglevel')
+    args = parser.parse_args()
+    main(args)
