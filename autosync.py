@@ -208,7 +208,7 @@ def create_handlers():
     if job_count:
         observer = Observer()
         log.debug("Created observer %s", observer)
-        log.debug("Setting up %s jobs (%s)", job_count, ', '.join(jobs.keys()))
+        log.info("Setting up %s jobs (%s)", job_count, ', '.join(jobs.keys()))
         handlers = {}
         for name, data in jobs.items():
             handler = Handler(observer, name, **data)
