@@ -6,12 +6,10 @@ import argparse
 import logging
 log = logging.getLogger(__name__)
 import os
-from os.path import dirname
 import sys
 import re
 import json
-from pprint import pprint
-from time import time, gmtime, strftime, sleep
+from time import time, sleep
 from argparse import ArgumentParser
 from watchdog.observers import Observer
 from watchdog.events import (
@@ -34,8 +32,6 @@ cmds = [
     'rm -f "{lock_file}"'
 ]
 
-def ts():
-    return strftime("%Y-%m-%d %H:%M:%S", gmtime())
 
 class Job(object):
     def __init__(self):
@@ -96,9 +92,9 @@ class Handler(FileSystemEventHandler):
     def handle_event(self, event):
         if os.path.basename(event.src_path) == LOCK_NAME: return
         abs_path = abspath(event.src_path)
-        abs_dir = dirname(abs_path)
+        abs_dir = os.path.dirname(abs_path)
         rel_path = relpath(abs_path, self.local_real)
-        rel_dir = dirname(rel_path)
+        rel_dir = os.path.dirname(rel_path)
         if rel_dir == '.': rel_dir = ''
 
         if self.ignore_re.match(rel_path):
