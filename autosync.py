@@ -127,7 +127,7 @@ def tick():
             continue
 
         if os.path.exists(handler.lock_file):
-            log.info("Waiting for previous sync to finish...")
+            log.info("(%s) Waiting for previous sync to finish...", name)
             continue
 
         # lock in the list of dirs to sync
