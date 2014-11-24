@@ -133,6 +133,7 @@ def tick():
         # lock in the list of dirs to sync
         dirs = list(handler.changed_dirs)
         handler.changed_dirs = []
+        log.info("(%s) Synchronizing changes in %s directories", name, len(dirs))
         log.debug("Dirs to sync: %s", dirs)
 
         # write the list of dirs to include to the lock file
@@ -160,7 +161,7 @@ def tick():
             remote=handler.remote
         )
 
-        log.info("(%s) %s", name, cmdstr)
+        log.debug("Command to run: %s", cmdstr)
         os.popen(cmdstr)
         log.debug("(%s) Resetting change time", name)
         handler.last_change = None
