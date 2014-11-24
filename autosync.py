@@ -208,7 +208,11 @@ def create_handlers():
             handler = Handler(observer, name, **data)
             handlers[name] = handler
         del jobs, job_count
-        observer.start()
+        try:
+            observer.start()
+        except FileNotFoundError as e:
+            log.error(e.args[1])
+            sys.exit(1)
         log.info("Started watching directories")
     else:
         sys.exit("No jobs defined in config file")
