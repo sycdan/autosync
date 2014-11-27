@@ -130,10 +130,6 @@ def tick():
             #log.debug("(%s) Delay not yet elapsed (%s to go)", name, remaining_time)
             continue
 
-        if os.path.exists(handler.lock_file):
-            log.info("(%s) Waiting for previous sync to finish...", name)
-            continue
-
         # lock in the list of dirs to sync
         dirs = list(handler.changed_dirs)
         handler.changed_dirs = []
@@ -229,7 +225,11 @@ def create_handlers():
         sys.exit("No jobs defined in config file")
 
 def main(args):
-    logging.basicConfig(format="%(levelname)-8s %(message)s", level=args.loglevel or logging.INFO)
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)-8s %(message)s",
+        datefmt="%H:%M:%S",
+        level=args.loglevel or logging.INFO
+    )
     load_config()
     create_handlers()
     try:
