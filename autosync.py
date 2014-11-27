@@ -124,63 +124,64 @@ class Job(FileSystemEventHandler):
         abs_dir = os.path.dirname(abs_path)
         rel_path = relpath(abs_path, self.local_abs)
         rel_dir = os.path.dirname(rel_path)
+        if rel_dir == '': rel_dir = '.'
 
         if self.ignore_re.match(rel_path):
             log.debug("(%s) Ignored file changed: %s", self.name, abs_path)
             return
+
+        self.last_change = time()
 
         log.debug(
             "(%s) New event:-\nAP: %s\nAD: %s\nRP: %s\nRD: %s",
             self.name, abs_path, abs_dir, rel_path, rel_dir
         )
 
-
-        self.last_change = time()
-
-        # check if we're already going to be syncing this subdir
+        # check if we're already going to be syncing this dir
         if rel_dir in self.changed_dirs:
-            #log.debug("(%s) Dir already in sync queue: %s", self.name, rel_dir)
             return
 
         log.debug("(%s) Dir added to sync queue: %s", self.name, rel_dir)
         self.changed_dirs.append(rel_dir)
 
-    def write_queue(self, items=None):
-        """Write the list of dirs to include in a sync to a file in the work dir."""
+    def initial_sync(self):
+        os.walk()
+        exit()
+        pass
+
+    def write_queue(self):
+        """Write the list of dirs to include in a sync to a file in the queue dir."""
 
         # pop elements off the list of changed dirs until it's empty, in case more are added while we're working
-        
-        changed_dirs = []
+        dirs = []
         while self.changed_dirs:
             path = self.changed_dirs.pop()
-            if path not in changed_dirs:
-                changed_dirs.append(path)
-        log.info("%s Synchronizing changes in %s", self, ', '.join(changed_dirs))
-
-        # get the last item in the queue, if any, so we can name the next one
-        last_queue_num = 0
-        queue_files = self.queue_files()
-        if len(queue_files):
-            # convert back to a number
-            last_queue_num = int(os.path.splitext(os.path.basename(queue_files[-1]))[0])
+            if path not in dirs:
+                dirs.append(path)
         self.last_change = 0
-        log.debug("%s Last queue item: %s", self, last_queue_num)
-        queue_file = os.path.join(self.work_dir, "{0}".format(last_queue_num + 1))
+        log.info("%s Synchronizing changes in %s", self, ', '.join(dirs))
 
         lines = []
-        for d in changed_dirs:
-            # write all parents, with no trailing slashes
-            head = d
+        for d in dirs:
+            d = '' if d == '.' else d.strip(os.sep)
+            lines.append(d + '/*')  # include all files in this dir
+            # include the dir itself, and all its parents, with no trailing slashes (this in an rsync requirement)
             while True:
-                head, tail = os.path.split(head)
-                if head == '': break
-                lines.append('{0}\n'.format(head))
-                if tail == '': break
+                if d == '': break
+                lines.append(d)
+                d, _ = os.path.split(d)
+        lines = sorted(lines)
+        log.debug("%s Lines to write to queue file: %s", self, lines)
 
-            # write the dir itself and tell rsync to include all files in it
-            lines.append('{0}{1}***\n'.format(d, '/'))
-        log.debug("%s Queue file lines: %s", self, lines)
-
+        # determine the name of the queue file by getting the last item in the queue, if any,
+        # and converting the filename back to a number
+        num = 0
+        queue_files = self.queue_files()
+        if len(queue_files):
+            num = int(os.path.splitext(os.path.basename(queue_files[-1]))[0])
+        num += 1
+        queue_file = os.path.join(self.work_dir, "{0}".format(num))
+        log.debug("%s Writing to queue file: %s", self, queue_file)
         with open(queue_file, 'wb') as f:
             f.write('\n'.join(lines).encode('utf-8'))
 
@@ -215,14 +216,17 @@ class Job(FileSystemEventHandler):
         try:
             while True:
                 sleep(0.5)
-                try:
-                    queue_file = self.queue_files().pop()
+                try:  # get the first item in the queue
+                    queue_file = self.queue_files().pop(0)
                 except IndexError:  # the queue was empty
                     continue
                 args = [
                    'rsync',
-                   '-vzru',
-                   '--delete',
+                   #'-a',  # archive mode; equals -rlptgoD (no -H,-A,-X)
+                   '-r',  # recurse into directories
+                   '-z',  # compress file data during the transfer
+                   '-q',  # suppress non-error messages
+                   '--delete',  # delete extraneous files from destination dirs
                    '--include-from={0}'.format(queue_file),
                    '--exclude=*',
                    '{0}/'.format(fslash(self.local_rel)),
@@ -237,22 +241,6 @@ class Job(FileSystemEventHandler):
                 os.remove(queue_file)
         except KeyboardInterrupt:
             log.debug("%s Stopped watching queue", self)
-
-
-def tick():
-    """Check each job to see if it's ready to sync."""
-    for _, job in jobs.items():
-        if job.last_change and time() > job.last_change + DELAY:
-            job.write_queue()
-
-        """
-        with open(job.lock_file, 'rb') as f:
-            contents = f.read()
-            log.debug("(%s) rsync include list:\n%s", name, contents)
-
-        log.debug("(%s) Resetting change time", name)
-        job.last_change = None
-        """
 
 def abspath(path, resolve_links=False):
     path = os.path.expanduser(path)
@@ -292,7 +280,7 @@ def create_jobs(config):
         for name, data in jobs_.items():
             job = Job(observer, name, **data)
             jobs[name] = job
-
+            job.initial_sync()
         del jobs_, job_count
         try:
             observer.start()
@@ -312,7 +300,10 @@ if __name__ == '__main__':
     jobs = create_jobs(config)
     try:
         while True:
-            tick()
+            # check each job to see if it's ready to sync
+            for _, job in jobs.items():
+                if job.last_change and time() > job.last_change + DELAY:
+                    job.write_queue()
     except KeyboardInterrupt:
         observer.stop()
         log.info("Normal shutdown")
