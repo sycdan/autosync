@@ -26,7 +26,7 @@ from watchdog.events import (
 CWD = os.getcwd()
 CONFIG_FILE = os.path.join(CWD, 'autosync.json')
 WORK_DIR = os.path.join(CWD, '.autosync')
-TIMEOUT = 3  # seconds
+TIMEOUT = 1  # seconds to wait before syncing (each change resets the timer)
 
 # TODO: fix the fact that logging must be set up here instead of at the bottom so it can be used by subprocesses
 parser = argparse.ArgumentParser()
