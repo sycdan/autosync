@@ -167,7 +167,7 @@ class Job(FileSystemEventHandler):
                     self.last_change = pipe.recv()
                     log.debug("%s Change logged at %s", self, self.last_change)
                 # check if the change timeout has expired, and sync if so
-                if not self.last_change and time() > self.last_change + TIMEOUT:
+                if self.last_change and time() > self.last_change + TIMEOUT:
                     self.sync()
         except KeyboardInterrupt:
             log.debug("%s Stopped watching for changes", self)
