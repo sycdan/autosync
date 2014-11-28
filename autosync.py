@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function
 from __future__ import unicode_literals
-from multiprocessing import Process
+from multiprocessing import Process, Pipe
 import argparse
 import logging
 log = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ from watchdog.events import (
 CWD = os.getcwd()
 CONFIG_FILE = os.path.join(CWD, 'autosync.json')
 WORK_DIR = os.path.join(CWD, '.autosync')
-DELAY = 1.5  # seconds
+TIMEOUT = 3  # seconds
 
 # TODO: fix the fact that logging must be set up here instead of at the bottom so it can be used by subprocesses
 parser = argparse.ArgumentParser()
@@ -44,10 +44,10 @@ logging.basicConfig(
 )
 
 def fslash(path):
-    return path.replace('\\', '/')
-
-def reslash(path):
-    return path.replace('/', os.sep)
+    ret = path.replace('\\', '/')
+    while '//' in ret:
+        ret = ret.replace('//', '/')
+    return ret
 
 class Job(FileSystemEventHandler):
     changed_dirs = []
@@ -59,13 +59,21 @@ class Job(FileSystemEventHandler):
         log.debug("Initializing job: %s", name)
         super(Job, self).__init__()
         self.name = name
-        self.last_change = None
+        self.last_change = 0
+
+        if os.path.isabs(local):
+            log.critical("%s Local path must be relative to %s", self, CWD)
+            sys.exit(1)
+
+        self.local_rel = os.path.relpath(local, CWD)
+        self.local_abs = os.path.join(CWD, local)
+        if not os.path.exists(self.local_abs):
+            log.critical("%s Local path does not exist: %s", self, self.local_abs)
+            sys.exit(1)
+
         self.remote = remote
 
-        self.local_rel = ".{0}{1}".format(os.sep, reslash(local))
-        self.local_abs = os.path.abspath(local)
-
-        log.debug("%s Local rel: %s; Local abs: %s; Remote: %s", self, self.local_rel, self.local_abs, remote)
+        log.debug("%s Local rel: %s; Local abs: %s; Remote: %s", self, self.local_rel, self.local_abs, self.remote)
 
         self.work_dir = os.path.join(WORK_DIR, name)
         if os.path.exists(self.work_dir):
@@ -85,172 +93,84 @@ class Job(FileSystemEventHandler):
                 log.warning(e)
 
         # build a regular expression for the ignore list
+        ignore_regexes = []
         ignore_list = global_ignore + ignore
         for i, path in enumerate(ignore_list):
-            if path.startswith('/'):
-                path = '^' + path.lstrip('/')
-            if not path.endswith('*'):
-                path = path + '$'
-            path = path.replace('.', '\.')
-            path = path.replace('*', '.*')
-            ignore_list[i] = path
-        log.debug("%s Regexified ignore list: %s", self, ignore_list)
-        self.ignore_re = re.compile('|'.join(ignore_list), re.IGNORECASE)
+            path = fslash(path)  # ensure all slashes are forward, for easy matching
+            path = path.replace('.', '\\.')  # match literal dots in the regex
+            path = path.replace('*', '.*')  # turen glob wildcards into regex ones
+            ignore_regexes.append('^' + path + '$')  # the file/dir itself
+            ignore_regexes.append('^' + path + '/.*')  # any children, if it's a dir
+        log.debug("%s Regexified ignore list: %s", self, ignore_regexes)
+        self.ignore_re = re.compile('|'.join(ignore_regexes), re.IGNORECASE)
+
+        # create an exclude file for rsync
+        self.exclude_file = os.path.join(self.work_dir, 'exclude.txt')
+        with open(self.exclude_file, 'wb') as f:
+            for path in ignore_list:
+                f.write('{0}{1}'.format(path, os.linesep).encode('utf-8'))
 
         log.debug("%s Adding handler to observer", self)
         observer.schedule(self, self.local_abs, recursive=True)
 
-        log.debug("%s Watching queue: %s", self, self.work_dir)
-        self.queue_watcher = Process(target=self.watch_queue)
-        self.queue_watcher.start()
-
         log.info("%s %s --> %s (ignoring %s)",
             self, self.local_abs, remote, 'only globals' if not ignore else ', '.join(ignore))
 
-    def on_created(self, event):
-        if isinstance(event, FileCreatedEvent):# we don't care about dir mutations
-            self.handle_event(event)
+        log.debug("%s Starting main loop", self)
+        self.parent_pipe, child_pipe = Pipe()
+        self.child_process = Process(target=self.loop, args=(child_pipe,))
+        self.child_process.start()
 
-    def on_modified(self, event):
-        if isinstance(event, FileModifiedEvent):# we don't care about dir mutations
-            self.handle_event(event)
-
-    def on_deleted(self, event):
-        if isinstance(event, FileDeletedEvent):  # we don't care about dir mutations
-            self.handle_event(event)
-
-    def handle_event(self, event):
-        abs_path = abspath(event.src_path)
-        abs_dir = os.path.dirname(abs_path)
-        rel_path = relpath(abs_path, self.local_abs)
-        rel_dir = os.path.dirname(rel_path)
-        if rel_dir == '': rel_dir = '.'
-
+    def on_any_event(self, event):
+        """
+        When a file changes, if it's not in the ignore list, alert the child process.
+        """
+        log.debug("%s %s", self, event)
+        rel_path = fslash(os.path.relpath(event.src_path, self.local_abs))
         if self.ignore_re.match(rel_path):
-            log.debug("(%s) Ignored file changed: %s", self.name, abs_path)
+            log.debug("(%s) Ignored file changed: %s", self.name, rel_path)
             return
+        self.parent_pipe.send(time())
 
-        self.last_change = time()
-
-        log.debug(
-            "(%s) New event:-\nAP: %s\nAD: %s\nRP: %s\nRD: %s",
-            self.name, abs_path, abs_dir, rel_path, rel_dir
-        )
-
-        # check if we're already going to be syncing this dir
-        if rel_dir in self.changed_dirs:
-            return
-
-        log.debug("(%s) Dir added to sync queue: %s", self.name, rel_dir)
-        self.changed_dirs.append(rel_dir)
-
-    def initial_sync(self):
-        os.walk()
-        exit()
-        pass
-
-    def write_queue(self):
-        """Write the list of dirs to include in a sync to a file in the queue dir."""
-
-        # pop elements off the list of changed dirs until it's empty, in case more are added while we're working
-        dirs = []
-        while self.changed_dirs:
-            path = self.changed_dirs.pop()
-            if path not in dirs:
-                dirs.append(path)
+    def sync(self):
+        """
+        Actually call rsync.
+        """
+        log.info("%s Starting%s sync", self, ' initital' if self.last_change == -1 else '')
         self.last_change = 0
-        log.info("%s Synchronizing changes in %s", self, ', '.join(dirs))
+        args = [
+           'rsync',
+           #'-a',  # archive mode; equals -rlptgoD (no -H,-A,-X)
+           '-r',  # recurse into directories
+           '-z',  # compress file data during the transfer
+           '-q',  # suppress non-error messages
+           '--delete',  # delete extraneous files from destination dirs
+           '--exclude-from={0}'.format(self.exclude_file),
+           fslash(self.local_rel).rstrip('/') + '/',
+           fslash(self.remote).rstrip('/') + '/',
+           '--chmod=ugo=rwX'  # use remote default permissions for new files
+        ]
+        log.debug("%s Running command: %s", self, ' '.join(args))
+        start_time = time()
+        subprocess.call(args)
+        log.info("%s Sync done in %d seconds", self, time() - start_time)
 
-        lines = []
-        for d in dirs:
-            d = '' if d == '.' else d.strip(os.sep)
-            lines.append(d + '/*')  # include all files in this dir
-            # include the dir itself, and all its parents, with no trailing slashes (this in an rsync requirement)
-            while True:
-                if d == '': break
-                lines.append(d)
-                d, _ = os.path.split(d)
-        lines = sorted(lines)
-        log.debug("%s Lines to write to queue file: %s", self, lines)
-
-        # determine the name of the queue file by getting the last item in the queue, if any,
-        # and converting the filename back to a number
-        num = 0
-        queue_files = self.queue_files()
-        if len(queue_files):
-            num = int(os.path.splitext(os.path.basename(queue_files[-1]))[0])
-        num += 1
-        queue_file = os.path.join(self.work_dir, "{0}".format(num))
-        log.debug("%s Writing to queue file: %s", self, queue_file)
-        with open(queue_file, 'wb') as f:
-            f.write('\n'.join(lines).encode('utf-8'))
-
-    def queue_files(self):
+    def loop(self, pipe):
         """
-        Returns the files in the queue dir as a sorted list.
-        Files are named as integers, with the lowest number being the highest priority.
-        """
-        ret = []
-        files = sorted(os.listdir(self.work_dir))
-        for file in files:
-            path = os.path.join(self.work_dir, file)
-
-            # skip dirs
-            if not os.path.isfile(path):
-                continue
-
-            # check it's a queue file valid name (can be cast to int)
-            try:
-                num = int(file)
-            except ValueError:
-                continue
-
-            ret.append(path)
-        return ret
-
-    def watch_queue(self):
-        """
-        Monitors the queue dir for lists of dirs to sync, and calls rsync when necessary.
-        Started as a subprocess when the job is created.
+        Wait for changes to be made by the parent process and start a sync when the timeout expires.
         """
         try:
+            self.last_change = -1  # force initial sync
             while True:
-                sleep(0.5)
-                try:  # get the first item in the queue
-                    queue_file = self.queue_files().pop(0)
-                except IndexError:  # the queue was empty
-                    continue
-                args = [
-                   'rsync',
-                   #'-a',  # archive mode; equals -rlptgoD (no -H,-A,-X)
-                   '-r',  # recurse into directories
-                   '-z',  # compress file data during the transfer
-                   '-q',  # suppress non-error messages
-                   '--delete',  # delete extraneous files from destination dirs
-                   '--include-from={0}'.format(queue_file),
-                   '--exclude=*',
-                   '{0}/'.format(fslash(self.local_rel)),
-                   '{0}/'.format(self.remote)
-                ]
-                log.debug("%s Running command: %s", self, ' '.join(args))
-                start_time = time()
-                subprocess.call(args)
-                log.info("%s Sync done in %d seconds", self, time() - start_time)
-
-                log.debug("%s Removing queue file: %s", self, queue_file)
-                os.remove(queue_file)
+                # check if a change was posted
+                if pipe.poll(0.1):  # block for 100ms
+                    self.last_change = pipe.recv()
+                    log.debug("%s Change logged at %s", self, self.last_change)
+                # check if the change timeout has expired, and sync if so
+                if not self.last_change and time() > self.last_change + TIMEOUT:
+                    self.sync()
         except KeyboardInterrupt:
-            log.debug("%s Stopped watching queue", self)
-
-def abspath(path, resolve_links=False):
-    path = os.path.expanduser(path)
-    path = os.path.realpath(path) if resolve_links else os.path.abspath(path)
-    return path.replace('\\', '/')
-
-def relpath(path, start):
-    path = path.replace('\\', '/')
-    start = start.replace('\\', '/')
-    return os.path.relpath(path, start).replace('\\', '/')
+            log.debug("%s Stopped watching for changes", self)
 
 def load_config():
     """Look for a config file in the CWD and parse it."""
@@ -280,7 +200,6 @@ def create_jobs(config):
         for name, data in jobs_.items():
             job = Job(observer, name, **data)
             jobs[name] = job
-            job.initial_sync()
         del jobs_, job_count
         try:
             observer.start()
@@ -300,10 +219,7 @@ if __name__ == '__main__':
     jobs = create_jobs(config)
     try:
         while True:
-            # check each job to see if it's ready to sync
-            for _, job in jobs.items():
-                if job.last_change and time() > job.last_change + DELAY:
-                    job.write_queue()
+            sleep(1)
     except KeyboardInterrupt:
         observer.stop()
         log.info("Normal shutdown")
