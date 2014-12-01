@@ -188,7 +188,7 @@ def load_config():
         return config
     else:
         log.warning("No config file found in %s", CWD)
-        sys.exit("Create %s first" % CONFIG_NAME)
+        sys.exit("Create %s first" % CONFIG_FILE)
 
 def create_jobs(config):
     """Instantiates an event handler for each job defined in the config."""
