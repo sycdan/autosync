@@ -1,9 +1,10 @@
 {
     "ignore": [
-        "/.iml",
-        "/.zedstate",
-        "/.git/*",
-        "/.idea/*"
+        ".iml",
+        ".zedstate",
+        ".git",
+        ".idea",
+        "*.pyc"
     ],
     "jobs": {
         "MyProject": {
