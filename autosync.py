@@ -136,7 +136,7 @@ class Job(FileSystemEventHandler):
         """
         Actually call rsync.
         """
-        log.info("%s Starting%s sync", self, ' initital' if self.last_change == -1 else '')
+        log.info("%s Starting%s sync", self, ' initial' if self.last_change == -1 else '')
         self.last_change = 0
         args = [
            'rsync',
