@@ -1,9 +1,9 @@
 {
     "ignore": [
-        ".iml",
-        ".zedstate",
         ".git",
+        ".zedstate",
         ".idea",
+        "*.iml",
         "*.pyc"
     ],
     "jobs": {
