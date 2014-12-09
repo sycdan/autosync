@@ -168,20 +168,20 @@ class Job(FileSystemEventHandler):
         """
         Wait for changes to be made by the parent process and start a sync when the timeout expires.
         """
+        parent_sync_pipe, child_sync_pipe = Pipe()
+        sync_process = Process(target=self.wait_for_sync_signals, args=(child_sync_pipe,))
+        sync_process.start()
         log.debug("%s Waiting for change signals", self)
+        last_change = 1  # force initial sync
         try:
-            parent_sync_pipe, child_sync_pipe = Pipe()
-            sync_process = Process(target=self.wait_for_sync_signals, args=(child_sync_pipe,))
-            sync_process.start()
-
-            last_change = 1 # force initial sync
             while True:
+                now = time()
                 # check if a change was posted
                 if pipe.poll(0.1):
                     pipe.recv()
-                    last_change = time()
+                    last_change = now
                 # check if the change timeout has expired, and sync if so
-                if last_change and time() > last_change + TIMEOUT:
+                if last_change and now - last_change > TIMEOUT:
                     last_change = 0
                     parent_sync_pipe.send(1)
         except KeyboardInterrupt:
