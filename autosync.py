@@ -125,11 +125,11 @@ class Job(FileSystemEventHandler):
         """
         When a file changes, if it's not in the ignore list, alert the child process.
         """
-        log.debug("%s %s", self, event)
         rel_path = fslash(os.path.relpath(event.src_path, self.local_abs))
         if self.ignore_re.match(rel_path):
-            log.debug("(%s) Ignored file changed: %s", self.name, rel_path)
+            log.debug("%s Ignored change in %s", self, rel_path)
             return
+        log.debug("%s Logged change in %s", self, rel_path)
         self.parent_pipe.send(time())
 
     def sync(self):
