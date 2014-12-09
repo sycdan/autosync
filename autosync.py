@@ -59,7 +59,7 @@ class Job(FileSystemEventHandler):
         log.debug("Initializing job: %s", name)
         super(Job, self).__init__()
         self.name = name
-        self.last_change = 0
+        self.sync_count = 0
 
         if os.path.isabs(local):
             log.critical("%s Local path must be relative to %s", self, CWD)
@@ -116,9 +116,8 @@ class Job(FileSystemEventHandler):
         log.info("%s %s --> %s (ignoring %s)",
             self, self.local_abs, remote, 'only globals' if not ignore else ', '.join(ignore))
 
-        log.debug("%s Starting main loop", self)
         self.parent_pipe, child_pipe = Pipe()
-        self.child_process = Process(target=self.loop, args=(child_pipe,))
+        self.child_process = Process(target=self.wait_for_change_signals, args=(child_pipe,))
         self.child_process.start()
 
     def on_any_event(self, event):
@@ -130,14 +129,13 @@ class Job(FileSystemEventHandler):
             log.debug("%s Ignored change in %s", self, rel_path)
             return
         log.debug("%s Logged change in %s", self, rel_path)
-        self.parent_pipe.send(time())
+        self.parent_pipe.send(rel_path)
 
     def sync(self):
         """
         Actually call rsync.
         """
-        log.info("%s Starting%s sync", self, ' initial' if self.last_change == -1 else '')
-        self.last_change = 0
+        log.info("%s Starting%s sync", self, ' initial' if self.sync_count == 0 else '')
         args = [
            'rsync',
            #'-a',  # archive mode; equals -rlptgoD (no -H,-A,-X)
@@ -154,23 +152,40 @@ class Job(FileSystemEventHandler):
         start_time = time()
         subprocess.call(args)
         log.info("%s Sync done in %d seconds", self, time() - start_time)
+        self.sync_count += 1
 
-    def loop(self, pipe):
+    def wait_for_sync_signals(self, pipe):
+        log.debug("%s Waiting for sync signals", self)
+        try:
+            while True:
+                if pipe.poll(None):
+                    pipe.recv()
+                    self.sync()
+        except KeyboardInterrupt:
+            log.debug("%s Stopped watching for sync signals", self)
+
+    def wait_for_change_signals(self, pipe):
         """
         Wait for changes to be made by the parent process and start a sync when the timeout expires.
         """
+        log.debug("%s Waiting for change signals", self)
         try:
-            self.last_change = -1  # force initial sync
+            parent_sync_pipe, child_sync_pipe = Pipe()
+            sync_process = Process(target=self.wait_for_sync_signals, args=(child_sync_pipe,))
+            sync_process.start()
+
+            last_change = 1 # force initial sync
             while True:
                 # check if a change was posted
-                if pipe.poll(0.1):  # block for 100ms
-                    self.last_change = pipe.recv()
-                    log.debug("%s Change logged at %s", self, self.last_change)
+                if pipe.poll(0.1):
+                    pipe.recv()
+                    last_change = time()
                 # check if the change timeout has expired, and sync if so
-                if self.last_change and time() > self.last_change + TIMEOUT:
-                    self.sync()
+                if last_change and time() > last_change + TIMEOUT:
+                    last_change = 0
+                    parent_sync_pipe.send(1)
         except KeyboardInterrupt:
-            log.debug("%s Stopped watching for changes", self)
+            log.debug("%s Stopped watching for change signals", self)
 
 def load_config():
     """Look for a config file in the CWD and parse it."""
