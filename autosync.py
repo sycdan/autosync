@@ -145,7 +145,7 @@ class Job(FileSystemEventHandler):
            '-z',  # compress file data during the transfer
            '-q',  # suppress non-error messages
            '--delete',  # delete extraneous files from destination dirs
-           '--exclude-from={0}'.format(self.exclude_file),
+           '--exclude-from={0}'.format(os.path.relpath(self.exclude_file, CWD)),
            fslash(self.local_rel).rstrip('/') + '/',
            fslash(self.remote).rstrip('/') + '/',
            '--chmod=ugo=rwX'  # use remote default permissions for new files
